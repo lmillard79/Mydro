@@ -1,7 +1,5 @@
-﻿using System.Net.Sockets;
 using System.Diagnostics;
 using mainAlg;
-using System.Data;
 using OSGeo.OSR;
 using OSGeo.GDAL;
 using delineateCatch;
@@ -10,9 +8,6 @@ using OSGeo.OGR;
 using System.Runtime.ExceptionServices;
 using System.Drawing;
 using Driver = OSGeo.GDAL.Driver;
-using System.ComponentModel;
-using System.Text.Json;
-using System.Xml;
 
 /*
 QMydro Version 1.1
@@ -245,169 +240,8 @@ class Program
         return rasterData;
     }
 
-    [Serializable]
-    public class LicenseFileReadException : Exception
-    {
-        public LicenseFileReadException(string message) : base(message) { }
-
-        public LicenseFileReadException(string message, Exception inner) : base(message, inner) { }
-    }
-
-    class License
-    {
-        const string LicenseValidationEndpoint = "https://hydrorepo.com/api/license";
-        const string LicensePath = @".\.license";  // License location is relative to the application
-
-        public bool Active { get; }
-        public string LicenseType { get; }
-        public string LicenseKey { get; }
-        public string CompanyName { get; }
-
-        public License(bool active, string licenseType, string licenseKey, string companyName)
-        {
-            Active = active;
-            LicenseType = licenseType;
-            LicenseKey = licenseKey;
-            CompanyName = companyName;
-        }
-
-        static private void SaveLicense(License license)
-        {
-            using FileStream fs = File.Create(LicensePath);
-            byte[] text = new UTF8Encoding(true).GetBytes(license.LicenseKey);
-            fs.Write(text, 0, text.Length);
-        }
-
-        static public License Verify()
-        {
-            string? licenseKey;
-
-            try
-            {
-                using StreamReader sr = File.OpenText(LicensePath);
-                licenseKey = sr.ReadLine();
-            }
-            catch (Exception ex)
-            {
-                if (ex is System.IO.FileNotFoundException)
-                {
-                    throw;  // First time users will not have a license file
-                }
-
-                throw new LicenseFileReadException("Error reading license file", ex);
-            }
-
-            if (licenseKey == null)
-            {
-                throw new LicenseFileReadException("License key file does not contain license key");
-            }
-
-            return Verify(licenseKey);
-        }
-
-        static public License Verify(string licenseKey)
-        {
-            // Request server for license information
-            var client = new HttpClient();
-            var requestMessage = new HttpRequestMessage(HttpMethod.Get, $"{LicenseValidationEndpoint}/{licenseKey}");
-            var responseMessage = client.Send(requestMessage);
-
-            // Throw exception on client for problems server side
-            if (!responseMessage.IsSuccessStatusCode)
-            {
-                throw responseMessage.StatusCode switch
-                {
-                    System.Net.HttpStatusCode.NotFound => new Exception("License does not exist"),
-                    System.Net.HttpStatusCode.InternalServerError => new Exception($"An internal server error occurred {responseMessage.Content}"),
-                    _ => new Exception($"An unknown error occurred ({responseMessage.StatusCode})"),
-                };
-            }
-
-            // Read response body
-            var jsonString = responseMessage.Content.ReadAsStringAsync().Result;
-            if (jsonString == null)
-            {
-                throw new Exception("License validation responded without a body");
-            }
-
-            // Deserialise json in response body
-            License? license = JsonSerializer.Deserialize<License>(jsonString);
-            if (license == null)
-            {
-                throw new Exception("License validation response is malformed");
-            }
-
-            // If it is an active license, remember it by saving it to a file
-            if (license.Active)
-            {
-                SaveLicense(license);
-            }
-
-            return license;
-        }
-    }
     static void Main(string[] args)
     {
-
-        License license;
-        
-        while (true)
-        {
-            // Attempt to verify remembered license
-            try
-            {
-                license = License.Verify();
-                break;
-            }
-            catch (Exception ex)
-            {
-                if (ex is LicenseFileReadException)
-                {
-                    // Warns if there are errors relating to only reading the license file (if it exists)
-                    Console.WriteLine($"There was an error reading the license file: {ex.Message}: {ex.InnerException?.Message}");
-                    // Force user to enter new license key (down below)
-                }
-
-                // License validation will continue if the license file is corrupted or doesn't exist
-            }
-
-            // Attempt to verify manually entered license
-            Console.Write("Enter your license: ");
-            string? licenseKey = Console.ReadLine();
-            if (licenseKey == null)
-            {
-                Console.WriteLine("Please enter a license key");
-                continue;
-            }
-
-            try
-            {
-                license = License.Verify(licenseKey);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"There was an error verifying the license key: {ex.Message}");
-                continue;
-            }
-
-            if (license.Active)
-            {
-                Console.WriteLine($"Authorized Use Solely For: {license.CompanyName}");
-                break;  // Continue to program
-            }
-            else
-            {
-                Console.WriteLine("Your license has expired!");
-                Console.WriteLine("Activate your license at https://mydro.com.au");
-                if (File.Exists(@".\.license"))
-                {
-                    File.Delete(@".\.license");
-                }
-                
-                continue;
-            }
-        }
-        
         foreach (string arg in args)
         {
             Console.WriteLine(arg);
